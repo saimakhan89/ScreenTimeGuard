@@ -59,7 +59,7 @@ if (-not (Test-Path (Join-Path $PublishDir "MinecraftBlocker.exe"))) {
 Write-Step "Checking for existing installation..."
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existing) {
-    Write-Host "    Found existing service — stopping and removing it."
+    Write-Host "    Found existing service - stopping and removing it."
     if ($existing.Status -ne 'Stopped') {
         Stop-Service -Name $ServiceName -Force
         Start-Sleep -Seconds 2
@@ -143,8 +143,8 @@ Write-Host "    Directory ACL set: Administrators + SYSTEM only."
 #    Standard users cannot even query the service control manager entry.
 #
 #    SDDL breakdown:
-#      (A;;CCLCSWRPWPDTLOCRRC;;;SY)        — SYSTEM: full service rights
-#      (A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA) — Admins: owner-level rights
+#      (A;;CCLCSWRPWPDTLOCRRC;;;SY)        - SYSTEM: full service rights
+#      (A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA) - Admins: owner-level rights
 # ---------------------------------------------------------------------------
 Write-Step "Hardening service control permissions (SDDL)..."
 $sddl = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"
@@ -173,5 +173,5 @@ Write-Host "  Config file       : $InstallDir\appsettings.json"
 Write-Host "  Event Log         : Application > Source = MinecraftBlocker"
 Write-Host ""
 Write-Host "  To edit the schedule, open appsettings.json as Administrator."
-Write-Host "  Changes are picked up live — no service restart needed."
+Write-Host "  Changes are picked up live - no service restart needed."
 Write-Host ""

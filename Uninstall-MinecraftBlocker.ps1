@@ -31,7 +31,7 @@ function Write-Step([string]$msg) {
 Write-Step "Stopping service '$ServiceName'..."
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($null -eq $svc) {
-    Write-Host "    Service not found — nothing to stop."
+    Write-Host "    Service not found - nothing to stop."
 } else {
     if ($svc.Status -ne 'Stopped') {
         # The service SDDL restricts sc.exe from standard users, but this script
@@ -67,7 +67,7 @@ if ($svcCheck) {
         Write-Host "             You may need to reboot for it to be fully removed." -ForegroundColor Yellow
     }
 } else {
-    Write-Host "    Service not found — skipping delete."
+    Write-Host "    Service not found - skipping delete."
 }
 
 # ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ try {
         [System.Diagnostics.EventLog]::DeleteEventSource($EventSource)
         Write-Host "    Event source removed."
     } else {
-        Write-Host "    Event source not found — skipping."
+        Write-Host "    Event source not found - skipping."
     }
 } catch {
     Write-Host "    WARNING: Could not remove Event Log source: $_" -ForegroundColor Yellow
@@ -89,7 +89,7 @@ try {
 # 4. Delete install directory (unless -KeepFiles)
 # ---------------------------------------------------------------------------
 if ($KeepFiles) {
-    Write-Host "`n    -KeepFiles specified — leaving '$InstallDir' intact."
+    Write-Host "`n    -KeepFiles specified - leaving '$InstallDir' intact."
 } else {
     Write-Step "Removing install directory '$InstallDir'..."
     if (Test-Path $InstallDir) {
@@ -104,7 +104,7 @@ if ($KeepFiles) {
         Remove-Item -Path $InstallDir -Recurse -Force
         Write-Host "    Directory removed."
     } else {
-        Write-Host "    Directory not found — skipping."
+        Write-Host "    Directory not found - skipping."
     }
 }
 
