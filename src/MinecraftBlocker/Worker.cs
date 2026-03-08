@@ -229,6 +229,10 @@ public sealed class BlockerWorker : BackgroundService
 
     private record ProcessMatch(int Pid, string Description);
 
+    /// <summary>Escapes backslashes and percent signs for use inside a WMI LIKE clause.</summary>
+    private static string EscapeWmiLike(string value) =>
+        value.Replace(@"\", @"\\").Replace("%", "[%]").Replace("_", "[_]");
+
     /// <summary>
     /// Returns all currently running Minecraft processes without killing them.
     /// One WMI scan per poll cycle, result shared between detection and kill paths.
@@ -262,20 +266,37 @@ public sealed class BlockerWorker : BackgroundService
             _logger.LogError(mex, "WMI query failed while scanning javaw.exe processes.");
         }
 
-        // Minecraft launcher by process name.
-        foreach (var name in cfg.LauncherProcessNames)
+        // Launcher processes — matched via WMI by executable path keyword.
+        // This is more reliable than GetProcessesByName for Electron apps whose names
+        // contain spaces, and correctly handles multiple helper processes by letting
+        // Kill(entireProcessTree:true) on the parent take care of all children.
+        if (cfg.LauncherProcessNames.Count > 0)
         {
+            // Build: ExecutablePath LIKE '%A%' OR ExecutablePath LIKE '%B%' ...
+            // WMI LIKE uses % as wildcard (same as SQL).
+            var likeClauses = cfg.LauncherProcessNames
+                .Select(n => $"ExecutablePath LIKE '%{EscapeWmiLike(n)}%'")
+                .ToList();
+
+            string launcherQuery =
+                "SELECT ProcessId, Name, ExecutablePath FROM Win32_Process WHERE "
+                + string.Join(" OR ", likeClauses);
+
             try
             {
-                foreach (var proc in Process.GetProcessesByName(name))
+                using var launcherSearcher = new ManagementObjectSearcher(launcherQuery);
+                using var launcherResults = launcherSearcher.Get();
+
+                foreach (ManagementObject obj in launcherResults)
                 {
-                    using (proc)
-                        found.Add(new ProcessMatch(proc.Id, $"{name} (PID {proc.Id})"));
+                    int pid = Convert.ToInt32(obj["ProcessId"]);
+                    string name = obj["Name"]?.ToString() ?? "launcher";
+                    found.Add(new ProcessMatch(pid, $"{name} (PID {pid})"));
                 }
             }
-            catch (Exception ex)
+            catch (ManagementException mex)
             {
-                _logger.LogError(ex, "Error enumerating launcher process '{Name}'.", name);
+                _logger.LogError(mex, "WMI query failed while scanning launcher processes.");
             }
         }
 
