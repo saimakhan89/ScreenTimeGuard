@@ -1,6 +1,6 @@
-# MinecraftBlocker
+# ScreenTimeGuard
 
-A tamper-resistant Windows Service (.NET 8) that blocks Minecraft Java Edition on weekdays and allows it freely on weekends.
+A tamper-resistant Windows Service (.NET 8) that blocks entertainment apps (Minecraft, Fortnite, Roblox) on weekdays and enforces a configurable daily time limit on weekends.
 
 ---
 
@@ -8,10 +8,22 @@ A tamper-resistant Windows Service (.NET 8) that blocks Minecraft Java Edition o
 
 | Day | Default behaviour |
 |-----|-------------------|
-| Monday – Friday | Any `javaw.exe` whose command line contains `.minecraft` is killed within 3 seconds. The Minecraft Launcher process is also killed. |
-| Saturday – Sunday | The service runs but takes no action. |
+| Monday - Friday | Any blocked app process is killed within 3 seconds. |
+| Saturday - Sunday | Apps are allowed up to the daily time limit (default: 60 min total across all apps), then killed for the rest of the day. |
 
 The service runs as **LocalSystem** (highest privilege), auto-starts at boot, and its file/service ACLs are set so a standard user account cannot stop, reconfigure, or delete it.
+
+---
+
+## Blocked apps (default)
+
+| App | Detection method |
+|-----|-----------------|
+| Minecraft (vanilla + Lunar Client) | `javaw.exe` command line + launcher path |
+| Fortnite | `FortniteClient-Win64-Shipping.exe` + `EpicGamesLauncher.exe` path |
+| Roblox | `RobloxPlayerBeta.exe` / `RobloxPlayer.exe` path |
+
+All apps share a single daily time counter on weekends.
 
 ---
 
@@ -20,7 +32,7 @@ The service runs as **LocalSystem** (highest privilege), auto-starts at boot, an
 | Requirement | Notes |
 |-------------|-------|
 | Windows 10 / 11 | 64-bit |
-| .NET 8 Runtime | [Download](https://dotnet.microsoft.com/download/dotnet/8.0) — "ASP.NET Core & .NET Runtime" |
+| .NET 8 Runtime | [Download](https://dotnet.microsoft.com/download/dotnet/8.0) - "ASP.NET Core & .NET Runtime" |
 | Visual Studio 2022 or `dotnet` CLI | To build |
 | PowerShell 5.1+ running as Administrator | For install/uninstall scripts |
 
@@ -32,7 +44,7 @@ The service runs as **LocalSystem** (highest privilege), auto-starts at boot, an
 
 ```powershell
 # From the repo root:
-dotnet publish src\MinecraftBlocker -c Release -r win-x64 --no-self-contained -o publish
+dotnet publish src/MinecraftBlocker -c Release -r win-x64 --no-self-contained -o publish
 ```
 
 This produces a `publish\` folder next to the install scripts.
@@ -57,18 +69,17 @@ The script:
 
 ```powershell
 Get-Service MinecraftBlocker   # Status should be Running
+Get-EventLog -LogName Application -Source ScreenTimeGuard -Newest 5
 ```
-
-Check the Windows Event Viewer → **Windows Logs → Application** and filter by source **MinecraftBlocker** to see start/block entries.
 
 ---
 
 ## Configuring the schedule
 
 Edit `C:\ProgramData\MinecraftBlocker\appsettings.json` **as Administrator**.
-Changes are detected automatically — **no restart required**.
+Changes are detected automatically - **no restart required**.
 
-### Block all day Mon–Fri (default)
+### Block all day Mon-Fri (default)
 
 ```json
 "BlockedDays": ["Monday","Tuesday","Wednesday","Thursday","Friday"],
@@ -84,34 +95,34 @@ Changes are detected automatically — **no restart required**.
 ]
 ```
 
-Multiple windows are supported:
+### Add a new app to block
+
+Add a fragment of the executable path to `ProcessPathKeywords`:
 
 ```json
-"AllowedTimeWindows": [
-  { "Start": "07:00:00", "End": "08:00:00" },
-  { "Start": "17:00:00", "End": "21:00:00" }
+"ProcessPathKeywords": [
+  "Lunar Client",
+  "FortniteClient-Win64-Shipping",
+  "EpicGamesLauncher",
+  "RobloxPlayerBeta",
+  "RobloxPlayer",
+  "Steam\\steamapps\\common\\YourGame"
 ]
-```
-
-### Add a custom Minecraft path
-
-If you use a non-standard launcher location, add a keyword that appears in the `javaw.exe` command line:
-
-```json
-"MinecraftKeywords": [".minecraft", "D:\\Games\\MyMinecraft"]
 ```
 
 ### Full config reference
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `BlockedDays` | string[] | Mon–Fri | Days when blocking is active |
-| `AllowedTimeWindows` | object[] | `[]` | Time ranges inside a blocked day when Minecraft is permitted |
-| `MinecraftKeywords` | string[] | `[".minecraft","minecraft"]` | Substrings matched against `javaw.exe` command line (case-insensitive) |
-| `LauncherProcessNames` | string[] | `["MinecraftLauncher","minecraft-launcher","Minecraft Launcher"]` | Process names (no `.exe`) to kill unconditionally on blocked days |
+| `BlockedDays` | string[] | Mon-Fri | Days when blocking is active |
+| `AllowedTimeWindows` | object[] | `[]` | Time ranges inside a blocked day when apps are permitted |
+| `JavaProcessKeywords` | string[] | `[".minecraft",".lunarclient","minecraft"]` | Substrings matched against `javaw.exe` command line (for Java-based games) |
+| `ProcessPathKeywords` | string[] | see above | Substrings matched against each process's executable path (for native apps) |
+| `FreeDayDailyLimitMinutes` | int | `60` | Shared daily limit in minutes across all blocked apps on free days (0 = unlimited) |
+| `TimeZoneId` | string | `"Eastern Standard Time"` | Schedule timezone - pinned to prevent clock-change bypass. Run `tzutil /l` for IDs. |
 | `PollIntervalSeconds` | int | `3` | How often the service scans for processes |
 | `LogBlockedAttempts` | bool | `true` | Write kill events to the Windows Event Log |
-| `EventLogSource` | string | `"MinecraftBlocker"` | Custom Event Log source name |
+| `EventLogSource` | string | `"ScreenTimeGuard"` | Custom Event Log source name |
 
 ---
 
@@ -134,8 +145,8 @@ Pass `-KeepFiles` to preserve the install directory (useful for re-deployment):
 Both scripts accept parameters:
 
 ```powershell
-.\Install-MinecraftBlocker.ps1 -PublishDir "C:\Build\publish" -InstallDir "D:\Services\MinecraftBlocker"
-.\Uninstall-MinecraftBlocker.ps1 -InstallDir "D:\Services\MinecraftBlocker"
+.\Install-MinecraftBlocker.ps1 -PublishDir "C:\Build\publish" -InstallDir "D:\Services\ScreenTimeGuard"
+.\Uninstall-MinecraftBlocker.ps1 -InstallDir "D:\Services\ScreenTimeGuard"
 ```
 
 ---
@@ -148,6 +159,7 @@ Both scripts accept parameters:
 | Deleting / editing files in the install dir | Directory ACL: Administrators + SYSTEM only |
 | Killing the service process in Task Manager | SYSTEM processes require SeDebugPrivilege; standard users lack it |
 | Disabling auto-start via `sc config` | Covered by the same service DACL |
+| Changing the system clock / timezone | Schedule pinned to configured `TimeZoneId` via UTC conversion |
 | Rebooting | Service is `start=auto`; restarts with Windows |
 | Crash / unexpected exit | Three automatic-restart failure actions configured |
 
@@ -160,7 +172,7 @@ Both scripts accept parameters:
 Blocked attempts are logged under:
 
 - **Log:** Application
-- **Source:** MinecraftBlocker
+- **Source:** ScreenTimeGuard
 - **Level:** Warning
 
 Service start/stop events are logged as Information.
@@ -168,7 +180,7 @@ Service start/stop events are logged as Information.
 View quickly:
 
 ```powershell
-Get-EventLog -LogName Application -Source MinecraftBlocker -Newest 20
+Get-EventLog -LogName Application -Source ScreenTimeGuard -Newest 20
 ```
 
 ---
@@ -176,16 +188,17 @@ Get-EventLog -LogName Application -Source MinecraftBlocker -Newest 20
 ## Project structure
 
 ```
-MinecraftBlocker/
-├── MinecraftBlocker.sln
-├── src/
-│   └── MinecraftBlocker/
-│       ├── MinecraftBlocker.csproj   # Worker Service, net8.0-windows
-│       ├── Program.cs                # Host setup
-│       ├── Worker.cs                 # BackgroundService — polling loop + kill logic
-│       ├── BlockerConfig.cs          # Config POCO
-│       └── appsettings.json          # Default schedule config
-├── Install-MinecraftBlocker.ps1
-├── Uninstall-MinecraftBlocker.ps1
-└── README.md
+ScreenTimeGuard/
+|- MinecraftBlocker.sln
+|- src/
+|  `- MinecraftBlocker/
+|     |- MinecraftBlocker.csproj   # Worker Service, net8.0-windows
+|     |- Program.cs                # Host setup
+|     |- Worker.cs                 # BackgroundService - polling loop + kill logic
+|     |- BlockerConfig.cs          # Config POCO
+|     |- PlayState.cs              # Per-day time tracking, persisted to play-state.json
+|     `- appsettings.json          # Default schedule config
+|- Install-MinecraftBlocker.ps1
+|- Uninstall-MinecraftBlocker.ps1
+`- README.md
 ```
