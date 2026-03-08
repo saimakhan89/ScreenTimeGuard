@@ -3,7 +3,7 @@ using System.Management;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 
-namespace MinecraftBlocker;
+namespace ScreenTimeGuard;
 
 /// <summary>
 /// Background worker that polls every N seconds, checks whether the current
@@ -42,16 +42,16 @@ public sealed class BlockerWorker : BackgroundService
         var cfg = _config.CurrentValue;
         RefreshTimeZone(cfg);
         var now = GetNow(cfg);
-        WriteEvent($"MinecraftBlocker service started. Schedule timezone: {_timeZone.DisplayName}. Current time: {now:ddd yyyy-MM-dd HH:mm:ss zzz}.", EventLogEntryType.Information);
-        _logger.LogInformation("MinecraftBlocker service started. Timezone: {Tz}. Now: {Now:ddd HH:mm:ss}.",
+        WriteEvent($"ScreenTimeGuard service started. Schedule timezone: {_timeZone.DisplayName}. Current time: {now:ddd yyyy-MM-dd HH:mm:ss zzz}.", EventLogEntryType.Information);
+        _logger.LogInformation("ScreenTimeGuard service started. Timezone: {Tz}. Now: {Now:ddd HH:mm:ss}.",
             _timeZone.Id, now);
         await base.StartAsync(cancellationToken);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        WriteEvent("MinecraftBlocker service stopped.", EventLogEntryType.Information);
-        _logger.LogInformation("MinecraftBlocker service stopped.");
+        WriteEvent("ScreenTimeGuard service stopped.", EventLogEntryType.Information);
+        _logger.LogInformation("ScreenTimeGuard service stopped.");
         await base.StopAsync(cancellationToken);
     }
 

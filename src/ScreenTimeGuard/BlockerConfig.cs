@@ -1,4 +1,4 @@
-namespace MinecraftBlocker;
+namespace ScreenTimeGuard;
 
 /// <summary>
 /// Root configuration object — bound from the "BlockerConfig" section of appsettings.json.

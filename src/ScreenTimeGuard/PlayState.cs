@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace MinecraftBlocker;
+namespace ScreenTimeGuard;
 
 /// <summary>
 /// Per-day play-time state persisted to play-state.json in the service install directory.

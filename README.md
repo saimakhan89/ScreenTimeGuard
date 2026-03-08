@@ -44,7 +44,7 @@ All apps share a single daily time counter on weekends.
 
 ```powershell
 # From the repo root:
-dotnet publish src/MinecraftBlocker -c Release -r win-x64 --no-self-contained -o publish
+dotnet publish src/ScreenTimeGuard -c Release -r win-x64 --no-self-contained -o publish
 ```
 
 This produces a `publish\` folder next to the install scripts.
@@ -53,11 +53,11 @@ This produces a `publish\` folder next to the install scripts.
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\Install-MinecraftBlocker.ps1
+.\Install-ScreenTimeGuard.ps1
 ```
 
 The script:
-- Copies binaries to `C:\ProgramData\MinecraftBlocker`
+- Copies binaries to `C:\ProgramData\ScreenTimeGuard`
 - Registers the service (`sc.exe create ... start=auto obj=LocalSystem`)
 - Pre-creates the Windows Event Log source
 - Removes all inherited ACEs from the install directory and grants **Administrators + SYSTEM only**
@@ -68,7 +68,7 @@ The script:
 ### 3. Verify
 
 ```powershell
-Get-Service MinecraftBlocker   # Status should be Running
+Get-Service ScreenTimeGuard   # Status should be Running
 Get-EventLog -LogName Application -Source ScreenTimeGuard -Newest 5
 ```
 
@@ -76,7 +76,7 @@ Get-EventLog -LogName Application -Source ScreenTimeGuard -Newest 5
 
 ## Configuring the schedule
 
-Edit `C:\ProgramData\MinecraftBlocker\appsettings.json` **as Administrator**.
+Edit `C:\ProgramData\ScreenTimeGuard\appsettings.json` **as Administrator**.
 Changes are detected automatically - **no restart required**.
 
 ### Block all day Mon-Fri (default)
@@ -129,13 +129,13 @@ Add a fragment of the executable path to `ProcessPathKeywords`:
 ## Uninstall
 
 ```powershell
-.\Uninstall-MinecraftBlocker.ps1
+.\Uninstall-ScreenTimeGuard.ps1
 ```
 
 Pass `-KeepFiles` to preserve the install directory (useful for re-deployment):
 
 ```powershell
-.\Uninstall-MinecraftBlocker.ps1 -KeepFiles
+.\Uninstall-ScreenTimeGuard.ps1 -KeepFiles
 ```
 
 ---
@@ -145,8 +145,8 @@ Pass `-KeepFiles` to preserve the install directory (useful for re-deployment):
 Both scripts accept parameters:
 
 ```powershell
-.\Install-MinecraftBlocker.ps1 -PublishDir "C:\Build\publish" -InstallDir "D:\Services\ScreenTimeGuard"
-.\Uninstall-MinecraftBlocker.ps1 -InstallDir "D:\Services\ScreenTimeGuard"
+.\Install-ScreenTimeGuard.ps1 -PublishDir "C:\Build\publish" -InstallDir "D:\Services\ScreenTimeGuard"
+.\Uninstall-ScreenTimeGuard.ps1 -InstallDir "D:\Services\ScreenTimeGuard"
 ```
 
 ---
@@ -155,7 +155,7 @@ Both scripts accept parameters:
 
 | Vector | Protection |
 |--------|-----------|
-| `sc stop MinecraftBlocker` (standard user) | Service DACL denies all service-control rights to non-admins |
+| `sc stop ScreenTimeGuard` (standard user) | Service DACL denies all service-control rights to non-admins |
 | Deleting / editing files in the install dir | Directory ACL: Administrators + SYSTEM only |
 | Killing the service process in Task Manager | SYSTEM processes require SeDebugPrivilege; standard users lack it |
 | Disabling auto-start via `sc config` | Covered by the same service DACL |
@@ -189,16 +189,16 @@ Get-EventLog -LogName Application -Source ScreenTimeGuard -Newest 20
 
 ```
 ScreenTimeGuard/
-|- MinecraftBlocker.sln
+|- ScreenTimeGuard.sln
 |- src/
-|  `- MinecraftBlocker/
-|     |- MinecraftBlocker.csproj   # Worker Service, net8.0-windows
+|  `- ScreenTimeGuard/
+|     |- ScreenTimeGuard.csproj   # Worker Service, net8.0-windows
 |     |- Program.cs                # Host setup
 |     |- Worker.cs                 # BackgroundService - polling loop + kill logic
 |     |- BlockerConfig.cs          # Config POCO
 |     |- PlayState.cs              # Per-day time tracking, persisted to play-state.json
 |     `- appsettings.json          # Default schedule config
-|- Install-MinecraftBlocker.ps1
-|- Uninstall-MinecraftBlocker.ps1
+|- Install-ScreenTimeGuard.ps1
+|- Uninstall-ScreenTimeGuard.ps1
 `- README.md
 ```

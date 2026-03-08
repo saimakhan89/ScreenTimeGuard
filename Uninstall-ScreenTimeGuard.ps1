@@ -1,25 +1,25 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Completely removes the MinecraftBlocker Windows service and optionally
+    Completely removes the ScreenTimeGuard Windows service and optionally
     deletes the install directory.
 
 .PARAMETER InstallDir
-    Path where the service was installed.  Defaults to C:\ProgramData\MinecraftBlocker.
+    Path where the service was installed.  Defaults to C:ProgramDataScreenTimeGuard.
 
 .PARAMETER KeepFiles
     Pass this switch to leave the install directory intact (useful for re-install / upgrade).
 #>
 param(
-    [string]$InstallDir = "C:\ProgramData\MinecraftBlocker",
+    [string]$InstallDir = "C:ProgramDataScreenTimeGuard",
     [switch]$KeepFiles
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ServiceName = "MinecraftBlocker"
-$EventSource = "MinecraftBlocker"
+$ServiceName = "ScreenTimeGuard"
+$EventSource = "ScreenTimeGuard"
 
 function Write-Step([string]$msg) {
     Write-Host "`n[*] $msg" -ForegroundColor Cyan
@@ -113,6 +113,6 @@ if ($KeepFiles) {
 # ---------------------------------------------------------------------------
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "  MinecraftBlocker has been uninstalled."                   -ForegroundColor Green
+Write-Host "  ScreenTimeGuard has been uninstalled."                   -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""

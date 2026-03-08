@@ -1,33 +1,33 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Installs the MinecraftBlocker Windows service and locks it down so a
+    Installs the ScreenTimeGuard Windows service and locks it down so a
     standard (non-admin) user cannot stop, modify, or delete it.
 
 .PARAMETER PublishDir
-    Path to the folder that contains the published MinecraftBlocker.exe and
+    Path to the folder that contains the published ScreenTimeGuard.exe and
     its companion files.  Defaults to .\publish  (relative to this script).
 
 .PARAMETER InstallDir
     Where the service files are deployed on the target machine.
-    Defaults to C:\ProgramData\MinecraftBlocker.
+    Defaults to C:\ProgramData\ScreenTimeGuard.
 
 .EXAMPLE
-    .\Install-MinecraftBlocker.ps1
-    .\Install-MinecraftBlocker.ps1 -PublishDir "C:\Build\publish" -InstallDir "D:\Services\MinecraftBlocker"
+    .\Install-ScreenTimeGuard.ps1
+    .\Install-ScreenTimeGuard.ps1 -PublishDir "C:\Build\publish" -InstallDir "D:\Services\ScreenTimeGuard"
 #>
 param(
     [string]$PublishDir  = (Join-Path $PSScriptRoot "publish"),
-    [string]$InstallDir  = "C:\ProgramData\MinecraftBlocker"
+    [string]$InstallDir  = "C:\ProgramData\ScreenTimeGuard"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ServiceName        = "MinecraftBlocker"
-$ServiceDisplayName = "Minecraft Blocker (Parental Control)"
-$ServiceDescription = "Monitors and terminates Minecraft Java Edition processes on weekdays."
-$BinaryPath         = Join-Path $InstallDir "MinecraftBlocker.exe"
+$ServiceName = "ScreenTimeGuard"
+$ServiceDisplayName = "Screen Time Guard (Parental Control)"
+$ServiceDescription = "Blocks entertainment apps on weekdays and enforces daily time limits on weekends."
+$BinaryPath         = Join-Path $InstallDir "ScreenTimeGuard.exe"
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -47,9 +47,9 @@ function Confirm-Success([int]$exitCode, [string]$context) {
 # 1. Verify publish output exists
 # ---------------------------------------------------------------------------
 Write-Step "Verifying published binary..."
-if (-not (Test-Path (Join-Path $PublishDir "MinecraftBlocker.exe"))) {
-    Write-Host "ERROR: MinecraftBlocker.exe not found in '$PublishDir'." -ForegroundColor Red
-    Write-Host "       Build the project first:  dotnet publish src\MinecraftBlocker -c Release -o publish" -ForegroundColor Yellow
+if (-not (Test-Path (Join-Path $PublishDir "ScreenTimeGuard.exe"))) {
+    Write-Host "ERROR: ScreenTimeGuard.exe not found in '$PublishDir'." -ForegroundColor Red
+    Write-Host "       Build the project first:  dotnet publish src\ScreenTimeGuard -c Release -o publish" -ForegroundColor Yellow
     exit 1
 }
 
@@ -81,7 +81,7 @@ Write-Host "    Files copied."
 #    the service doesn't need to do it at runtime).
 # ---------------------------------------------------------------------------
 Write-Step "Registering Windows Event Log source..."
-$eventSource = "MinecraftBlocker"
+$eventSource = "ScreenTimeGuard"
 if (-not [System.Diagnostics.EventLog]::SourceExists($eventSource)) {
     [System.Diagnostics.EventLog]::CreateEventSource($eventSource, "Application")
     Write-Host "    Event source '$eventSource' created."
@@ -165,12 +165,12 @@ Write-Host "    Service status: $($svc.Status)"
 # ---------------------------------------------------------------------------
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "  MinecraftBlocker installed and running successfully."    -ForegroundColor Green
+Write-Host "  ScreenTimeGuard installed and running successfully."    -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Install directory : $InstallDir"
 Write-Host "  Config file       : $InstallDir\appsettings.json"
-Write-Host "  Event Log         : Application > Source = MinecraftBlocker"
+Write-Host "  Event Log         : Application > Source = ScreenTimeGuard"
 Write-Host ""
 Write-Host "  To edit the schedule, open appsettings.json as Administrator."
 Write-Host "  Changes are picked up live - no service restart needed."

@@ -1,4 +1,4 @@
-using MinecraftBlocker;
+using ScreenTimeGuard;
 
 var host = Host.CreateDefaultBuilder(args)
     // Sets ContentRoot to AppContext.BaseDirectory so appsettings.json is found
@@ -6,7 +6,7 @@ var host = Host.CreateDefaultBuilder(args)
     .UseContentRoot(AppContext.BaseDirectory)
     .UseWindowsService(options =>
     {
-        options.ServiceName = "MinecraftBlocker";
+        options.ServiceName = "ScreenTimeGuard";
     })
     .ConfigureServices((ctx, services) =>
     {
