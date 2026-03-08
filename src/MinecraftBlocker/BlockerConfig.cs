@@ -48,6 +48,13 @@ public sealed class BlockerConfig
         "Minecraft Launcher"
     ];
 
+    /// <summary>
+    /// Daily play-time limit in minutes on free days (weekend / days not in BlockedDays).
+    /// The counter resets at midnight. Set to 0 for unlimited play on free days.
+    /// Default: 60 minutes.
+    /// </summary>
+    public int FreeDayDailyLimitMinutes { get; set; } = 60;
+
     /// <summary>How often the service checks for running processes (seconds).</summary>
     public int PollIntervalSeconds { get; set; } = 3;
 

@@ -1,22 +1,29 @@
 using System.Diagnostics;
 using System.Management;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 
 namespace MinecraftBlocker;
 
 /// <summary>
 /// Background worker that polls every N seconds, checks whether the current
-/// day/time is blocked, and kills any matching Minecraft processes.
+/// day/time is blocked or over the free-day limit, and kills matching processes.
 /// </summary>
 public sealed class BlockerWorker : BackgroundService
 {
     private readonly ILogger<BlockerWorker> _logger;
     private readonly IOptionsMonitor<BlockerConfig> _config;
 
-    // Track PIDs we have already logged in this enforcement window to avoid
-    // flooding the Event Log when the process is slow to die.
+    // Track PIDs we have already logged to avoid Event Log flooding when a
+    // process is slow to die. Flushed every minute.
     private readonly HashSet<int> _recentlyLogged = new();
     private DateTime _lastLogFlush = DateTime.UtcNow;
+
+    // Per-day play-time state, persisted to disk so a service restart mid-day
+    // doesn't reset the counter.
+    private PlayState _playState = new();
+    private static readonly string StateFilePath =
+        Path.Combine(AppContext.BaseDirectory, "play-state.json");
 
     public BlockerWorker(ILogger<BlockerWorker> logger, IOptionsMonitor<BlockerConfig> config)
     {
@@ -27,6 +34,7 @@ public sealed class BlockerWorker : BackgroundService
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
         EnsureEventSource();
+        _playState = LoadPlayState();
         WriteEvent("MinecraftBlocker service started.", EventLogEntryType.Information);
         _logger.LogInformation("MinecraftBlocker service started.");
         await base.StartAsync(cancellationToken);
@@ -45,20 +53,41 @@ public sealed class BlockerWorker : BackgroundService
         {
             var cfg = _config.CurrentValue;
             var interval = TimeSpan.FromSeconds(Math.Clamp(cfg.PollIntervalSeconds, 1, 60));
+            var today = DateOnly.FromDateTime(DateTime.Today);
 
-            // Flush the "recently logged" set every minute to allow re-logging
-            // if a process is restarted after being killed.
+            // Flush event-log dedup set every minute so re-launched processes get logged.
             if (DateTime.UtcNow - _lastLogFlush > TimeSpan.FromMinutes(1))
             {
                 _recentlyLogged.Clear();
                 _lastLogFlush = DateTime.UtcNow;
             }
 
+            // Reset the play-time counter at midnight.
+            if (_playState.Date != today)
+            {
+                _logger.LogInformation(
+                    "New day ({Date}). Resetting play-time counter (was {Played:F1} min).",
+                    today, _playState.PlayedMinutes);
+                _playState = new PlayState { Date = today };
+                SavePlayState();
+            }
+
             try
             {
+                // Single scan — result is reused by both paths to avoid double WMI query.
+                var matches = FindMinecraftProcesses(cfg);
+
                 if (ShouldBlockNow(cfg))
                 {
-                    EnforceBlock(cfg);
+                    // Weekday (outside allowed windows): kill unconditionally.
+                    foreach (var m in matches)
+                        KillProcessById(m.Pid, m.Description, cfg);
+                }
+                else if (cfg.FreeDayDailyLimitMinutes > 0
+                         && !cfg.BlockedDays.Contains(DateTime.Now.DayOfWeek))
+                {
+                    // Free day with a configured daily limit.
+                    EnforceFreeDayLimit(matches, cfg, interval);
                 }
             }
             catch (Exception ex)
@@ -79,41 +108,91 @@ public sealed class BlockerWorker : BackgroundService
         var now = DateTime.Now;
 
         if (!cfg.BlockedDays.Contains(now.DayOfWeek))
-            return false; // Weekend / non-blocked day — let it run.
+            return false;
 
-        // If allowed windows are configured, check whether we are inside one.
         if (cfg.AllowedTimeWindows.Count > 0)
         {
             var tod = now.TimeOfDay;
             foreach (var window in cfg.AllowedTimeWindows)
             {
                 if (window.Contains(tod))
-                    return false; // Inside an allowed window — let it run.
+                    return false;
             }
         }
 
-        return true; // Blocked day, outside any allowed window.
+        return true;
     }
 
     // -------------------------------------------------------------------------
-    // Process enforcement
+    // Free-day time-limit enforcement
     // -------------------------------------------------------------------------
 
-    private void EnforceBlock(BlockerConfig cfg)
+    private void EnforceFreeDayLimit(
+        List<ProcessMatch> matches, BlockerConfig cfg, TimeSpan pollInterval)
     {
-        KillMinecraftJvm(cfg);
-        KillLauncherProcesses(cfg);
+        if (matches.Count == 0)
+            return; // Nothing running — nothing to track or kill.
+
+        double limitSeconds = cfg.FreeDayDailyLimitMinutes * 60.0;
+
+        if (!_playState.LimitReached)
+        {
+            // Accumulate: add one poll interval worth of play time.
+            _playState.PlayedSeconds += pollInterval.TotalSeconds;
+
+            // One-time "5 minutes remaining" warning.
+            double remaining = limitSeconds - _playState.PlayedSeconds;
+            if (!_playState.WarningSent && remaining is <= 300 and > 0)
+            {
+                int minsLeft = (int)Math.Ceiling(remaining / 60.0);
+                string warn = $"Weekend play time: ~{minsLeft} minute(s) remaining today.";
+                _logger.LogInformation("{Message}", warn);
+                if (cfg.LogBlockedAttempts)
+                    WriteEvent(warn, EventLogEntryType.Information);
+                _playState.WarningSent = true;
+            }
+
+            if (_playState.PlayedSeconds >= limitSeconds)
+            {
+                _playState.LimitReached = true;
+                string msg =
+                    $"Weekend daily limit of {cfg.FreeDayDailyLimitMinutes} min reached " +
+                    $"({_playState.PlayedMinutes:F1} min played). " +
+                    "Blocking Minecraft for the rest of today.";
+                _logger.LogWarning("{Message}", msg);
+                if (cfg.LogBlockedAttempts)
+                    WriteEvent(msg, EventLogEntryType.Warning);
+            }
+
+            SavePlayState();
+        }
+
+        // Kill only once the limit is actually reached (LimitReached may have just
+        // been set above, or was already set from a previous poll/service restart).
+        if (_playState.LimitReached)
+        {
+            foreach (var m in matches)
+                KillProcessById(m.Pid, m.Description, cfg);
+        }
     }
+
+    // -------------------------------------------------------------------------
+    // Process detection  (find-first, kill-separately)
+    // -------------------------------------------------------------------------
+
+    private record ProcessMatch(int Pid, string Description);
 
     /// <summary>
-    /// Finds javaw.exe processes whose command line references .minecraft and kills them.
-    /// WMI is used because System.Diagnostics.Process does not expose CommandLine.
+    /// Returns all currently running Minecraft processes without killing them.
+    /// One WMI scan per poll cycle, result shared between detection and kill paths.
     /// </summary>
-    private void KillMinecraftJvm(BlockerConfig cfg)
+    private List<ProcessMatch> FindMinecraftProcesses(BlockerConfig cfg)
     {
+        var found = new List<ProcessMatch>();
+
+        // javaw.exe whose command line contains a MinecraftKeyword.
         const string query =
             "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'javaw.exe'";
-
         try
         {
             using var searcher = new ManagementObjectSearcher(query);
@@ -128,20 +207,15 @@ public sealed class BlockerWorker : BackgroundService
                     cmdLine.Contains(kw, StringComparison.OrdinalIgnoreCase));
 
                 if (isMinecraft)
-                    KillProcessById(pid, $"javaw.exe (PID {pid})", cfg);
+                    found.Add(new ProcessMatch(pid, $"javaw.exe (PID {pid})"));
             }
         }
         catch (ManagementException mex)
         {
             _logger.LogError(mex, "WMI query failed while scanning javaw.exe processes.");
         }
-    }
 
-    /// <summary>
-    /// Kills any running process whose name matches one of the configured launcher names.
-    /// </summary>
-    private void KillLauncherProcesses(BlockerConfig cfg)
-    {
+        // Minecraft launcher by process name.
         foreach (var name in cfg.LauncherProcessNames)
         {
             try
@@ -149,7 +223,7 @@ public sealed class BlockerWorker : BackgroundService
                 foreach (var proc in Process.GetProcessesByName(name))
                 {
                     using (proc)
-                        KillProcessById(proc.Id, $"{name} (PID {proc.Id})", cfg);
+                        found.Add(new ProcessMatch(proc.Id, $"{name} (PID {proc.Id})"));
                 }
             }
             catch (Exception ex)
@@ -157,6 +231,8 @@ public sealed class BlockerWorker : BackgroundService
                 _logger.LogError(ex, "Error enumerating launcher process '{Name}'.", name);
             }
         }
+
+        return found;
     }
 
     private void KillProcessById(int pid, string description, BlockerConfig cfg)
@@ -172,17 +248,47 @@ public sealed class BlockerWorker : BackgroundService
             if (cfg.LogBlockedAttempts && _recentlyLogged.Add(pid))
                 WriteEvent(msg, EventLogEntryType.Warning);
         }
-        catch (ArgumentException)
-        {
-            // Process already exited between enumeration and kill — harmless.
-        }
-        catch (InvalidOperationException)
-        {
-            // Process exited before we could call Kill().
-        }
+        catch (ArgumentException) { /* Process already exited. */ }
+        catch (InvalidOperationException) { /* Process exited before Kill(). */ }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to kill process {Description}.", description);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Play-state persistence
+    // -------------------------------------------------------------------------
+
+    private static PlayState LoadPlayState()
+    {
+        try
+        {
+            if (File.Exists(StateFilePath))
+            {
+                var json = File.ReadAllText(StateFilePath);
+                var loaded = JsonSerializer.Deserialize<PlayState>(json);
+                // Only reuse state if it's for today — otherwise start fresh.
+                if (loaded?.Date == DateOnly.FromDateTime(DateTime.Today))
+                    return loaded;
+            }
+        }
+        catch { /* Start fresh on any deserialization error. */ }
+
+        return new PlayState { Date = DateOnly.FromDateTime(DateTime.Today) };
+    }
+
+    private void SavePlayState()
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(
+                _playState, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(StateFilePath, json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not save play-state to '{Path}'.", StateFilePath);
         }
     }
 
@@ -203,7 +309,6 @@ public sealed class BlockerWorker : BackgroundService
         }
         catch (Exception ex)
         {
-            // Non-fatal: may fail if the source was already created by another account.
             _logger.LogWarning(ex, "Could not create Event Log source '{Source}'.", source);
         }
     }
