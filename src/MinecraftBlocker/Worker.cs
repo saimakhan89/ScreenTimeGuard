@@ -19,6 +19,10 @@ public sealed class BlockerWorker : BackgroundService
     private readonly HashSet<int> _recentlyLogged = new();
     private DateTime _lastLogFlush = DateTime.UtcNow;
 
+    // Cached TimeZoneInfo resolved from config. Rebuilt whenever the config reloads.
+    private TimeZoneInfo _timeZone = TimeZoneInfo.Local;
+    private string _loadedTimeZoneId = string.Empty;
+
     // Per-day play-time state, persisted to disk so a service restart mid-day
     // doesn't reset the counter.
     private PlayState _playState = new();
@@ -35,8 +39,12 @@ public sealed class BlockerWorker : BackgroundService
     {
         EnsureEventSource();
         _playState = LoadPlayState();
-        WriteEvent("MinecraftBlocker service started.", EventLogEntryType.Information);
-        _logger.LogInformation("MinecraftBlocker service started.");
+        var cfg = _config.CurrentValue;
+        RefreshTimeZone(cfg);
+        var now = GetNow(cfg);
+        WriteEvent($"MinecraftBlocker service started. Schedule timezone: {_timeZone.DisplayName}. Current time: {now:ddd yyyy-MM-dd HH:mm:ss zzz}.", EventLogEntryType.Information);
+        _logger.LogInformation("MinecraftBlocker service started. Timezone: {Tz}. Now: {Now:ddd HH:mm:ss}.",
+            _timeZone.Id, now);
         await base.StartAsync(cancellationToken);
     }
 
@@ -53,7 +61,10 @@ public sealed class BlockerWorker : BackgroundService
         {
             var cfg = _config.CurrentValue;
             var interval = TimeSpan.FromSeconds(Math.Clamp(cfg.PollIntervalSeconds, 1, 60));
-            var today = DateOnly.FromDateTime(DateTime.Today);
+
+            RefreshTimeZone(cfg);
+            var now = GetNow(cfg);
+            var today = DateOnly.FromDateTime(now);
 
             // Flush event-log dedup set every minute so re-launched processes get logged.
             if (DateTime.UtcNow - _lastLogFlush > TimeSpan.FromMinutes(1))
@@ -62,11 +73,11 @@ public sealed class BlockerWorker : BackgroundService
                 _lastLogFlush = DateTime.UtcNow;
             }
 
-            // Reset the play-time counter at midnight.
+            // Reset the play-time counter at midnight (Eastern time).
             if (_playState.Date != today)
             {
                 _logger.LogInformation(
-                    "New day ({Date}). Resetting play-time counter (was {Played:F1} min).",
+                    "New day ({Date} Eastern). Resetting play-time counter (was {Played:F1} min).",
                     today, _playState.PlayedMinutes);
                 _playState = new PlayState { Date = today };
                 SavePlayState();
@@ -77,14 +88,14 @@ public sealed class BlockerWorker : BackgroundService
                 // Single scan — result is reused by both paths to avoid double WMI query.
                 var matches = FindMinecraftProcesses(cfg);
 
-                if (ShouldBlockNow(cfg))
+                if (ShouldBlockNow(now, cfg))
                 {
                     // Weekday (outside allowed windows): kill unconditionally.
                     foreach (var m in matches)
                         KillProcessById(m.Pid, m.Description, cfg);
                 }
                 else if (cfg.FreeDayDailyLimitMinutes > 0
-                         && !cfg.BlockedDays.Contains(DateTime.Now.DayOfWeek))
+                         && !cfg.BlockedDays.Contains(now.DayOfWeek))
                 {
                     // Free day with a configured daily limit.
                     EnforceFreeDayLimit(matches, cfg, interval);
@@ -100,13 +111,49 @@ public sealed class BlockerWorker : BackgroundService
     }
 
     // -------------------------------------------------------------------------
+    // Timezone helpers
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns the current time in the configured timezone (default: Eastern Standard Time).
+    /// All schedule comparisons use this value — not DateTime.Now — so the schedule
+    /// cannot be bypassed by changing the machine's local timezone.
+    /// </summary>
+    private DateTime GetNow(BlockerConfig cfg)
+    {
+        RefreshTimeZone(cfg);
+        return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _timeZone);
+    }
+
+    /// <summary>Rebuilds the cached TimeZoneInfo if the config TimeZoneId changed.</summary>
+    private void RefreshTimeZone(BlockerConfig cfg)
+    {
+        if (cfg.TimeZoneId == _loadedTimeZoneId)
+            return;
+
+        try
+        {
+            _timeZone = TimeZoneInfo.FindSystemTimeZoneById(cfg.TimeZoneId);
+            _loadedTimeZoneId = cfg.TimeZoneId;
+            _logger.LogInformation("Schedule timezone set to '{Id}' ({Display}).",
+                _timeZone.Id, _timeZone.DisplayName);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            _logger.LogWarning(
+                "TimeZoneId '{Id}' not found — falling back to local time. " +
+                "Run 'tzutil /l' for valid IDs.", cfg.TimeZoneId);
+            _timeZone = TimeZoneInfo.Local;
+            _loadedTimeZoneId = cfg.TimeZoneId; // Don't retry every poll.
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Schedule logic
     // -------------------------------------------------------------------------
 
-    private static bool ShouldBlockNow(BlockerConfig cfg)
+    private static bool ShouldBlockNow(DateTime now, BlockerConfig cfg)
     {
-        var now = DateTime.Now;
-
         if (!cfg.BlockedDays.Contains(now.DayOfWeek))
             return false;
 
@@ -242,7 +289,8 @@ public sealed class BlockerWorker : BackgroundService
             using var proc = Process.GetProcessById(pid);
             proc.Kill(entireProcessTree: true);
 
-            string msg = $"Blocked: killed Minecraft process {description} at {DateTime.Now:T} on {DateTime.Now:dddd}.";
+            var nowEst = GetNow(_config.CurrentValue);
+            string msg = $"Blocked: killed Minecraft process {description} at {nowEst:T} on {nowEst:dddd} (Eastern).";
             _logger.LogWarning("{Message}", msg);
 
             if (cfg.LogBlockedAttempts && _recentlyLogged.Add(pid))

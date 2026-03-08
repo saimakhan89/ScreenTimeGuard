@@ -55,6 +55,13 @@ public sealed class BlockerConfig
     /// </summary>
     public int FreeDayDailyLimitMinutes { get; set; } = 60;
 
+    /// <summary>
+    /// Windows timezone ID used for all schedule decisions.
+    /// Pinning to a specific timezone prevents circumvention by changing the machine clock.
+    /// Run `tzutil /l` to list valid IDs. Default: Eastern Standard Time (covers EST/EDT).
+    /// </summary>
+    public string TimeZoneId { get; set; } = "Eastern Standard Time";
+
     /// <summary>How often the service checks for running processes (seconds).</summary>
     public int PollIntervalSeconds { get; set; } = 3;
 
