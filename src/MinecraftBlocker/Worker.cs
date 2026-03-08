@@ -86,7 +86,7 @@ public sealed class BlockerWorker : BackgroundService
             try
             {
                 // Single scan — result is reused by both paths to avoid double WMI query.
-                var matches = FindMinecraftProcesses(cfg);
+                var matches = FindBlockedProcesses(cfg);
 
                 if (ShouldBlockNow(now, cfg))
                 {
@@ -234,69 +234,70 @@ public sealed class BlockerWorker : BackgroundService
         value.Replace(@"\", @"\\").Replace("%", "[%]").Replace("_", "[_]");
 
     /// <summary>
-    /// Returns all currently running Minecraft processes without killing them.
+    /// Returns all currently running blocked-app processes without killing them.
     /// One WMI scan per poll cycle, result shared between detection and kill paths.
     /// </summary>
-    private List<ProcessMatch> FindMinecraftProcesses(BlockerConfig cfg)
+    private List<ProcessMatch> FindBlockedProcesses(BlockerConfig cfg)
     {
         var found = new List<ProcessMatch>();
 
-        // javaw.exe whose command line contains a MinecraftKeyword.
-        const string query =
-            "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'javaw.exe'";
-        try
+        // javaw.exe whose command line matches a JavaProcessKeyword.
+        // This catches Java-based games (Minecraft, etc.) without killing IDEs.
+        if (cfg.JavaProcessKeywords.Count > 0)
         {
-            using var searcher = new ManagementObjectSearcher(query);
-            using var results = searcher.Get();
-
-            foreach (ManagementObject obj in results)
+            const string query =
+                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'javaw.exe'";
+            try
             {
-                int pid = Convert.ToInt32(obj["ProcessId"]);
-                string cmdLine = obj["CommandLine"]?.ToString() ?? string.Empty;
+                using var searcher = new ManagementObjectSearcher(query);
+                using var results = searcher.Get();
 
-                bool isMinecraft = cfg.MinecraftKeywords.Any(kw =>
-                    cmdLine.Contains(kw, StringComparison.OrdinalIgnoreCase));
+                foreach (ManagementObject obj in results)
+                {
+                    int pid = Convert.ToInt32(obj["ProcessId"]);
+                    string cmdLine = obj["CommandLine"]?.ToString() ?? string.Empty;
 
-                if (isMinecraft)
-                    found.Add(new ProcessMatch(pid, $"javaw.exe (PID {pid})"));
+                    bool isBlocked = cfg.JavaProcessKeywords.Any(kw =>
+                        cmdLine.Contains(kw, StringComparison.OrdinalIgnoreCase));
+
+                    if (isBlocked)
+                        found.Add(new ProcessMatch(pid, $"javaw.exe (PID {pid})"));
+                }
+            }
+            catch (ManagementException mex)
+            {
+                _logger.LogError(mex, "WMI query failed while scanning javaw.exe processes.");
             }
         }
-        catch (ManagementException mex)
-        {
-            _logger.LogError(mex, "WMI query failed while scanning javaw.exe processes.");
-        }
 
-        // Launcher processes — matched via WMI by executable path keyword.
-        // This is more reliable than GetProcessesByName for Electron apps whose names
-        // contain spaces, and correctly handles multiple helper processes by letting
-        // Kill(entireProcessTree:true) on the parent take care of all children.
-        if (cfg.LauncherProcessNames.Count > 0)
+        // Native app processes — matched via WMI by ExecutablePath keyword.
+        // Covers Fortnite, Roblox, launchers, and any other native exe.
+        // More reliable than GetProcessesByName for apps with spaces in their names.
+        if (cfg.ProcessPathKeywords.Count > 0)
         {
-            // Build: ExecutablePath LIKE '%A%' OR ExecutablePath LIKE '%B%' ...
-            // WMI LIKE uses % as wildcard (same as SQL).
-            var likeClauses = cfg.LauncherProcessNames
+            var likeClauses = cfg.ProcessPathKeywords
                 .Select(n => $"ExecutablePath LIKE '%{EscapeWmiLike(n)}%'")
                 .ToList();
 
-            string launcherQuery =
+            string pathQuery =
                 "SELECT ProcessId, Name, ExecutablePath FROM Win32_Process WHERE "
                 + string.Join(" OR ", likeClauses);
 
             try
             {
-                using var launcherSearcher = new ManagementObjectSearcher(launcherQuery);
-                using var launcherResults = launcherSearcher.Get();
+                using var pathSearcher = new ManagementObjectSearcher(pathQuery);
+                using var pathResults = pathSearcher.Get();
 
-                foreach (ManagementObject obj in launcherResults)
+                foreach (ManagementObject obj in pathResults)
                 {
                     int pid = Convert.ToInt32(obj["ProcessId"]);
-                    string name = obj["Name"]?.ToString() ?? "launcher";
+                    string name = obj["Name"]?.ToString() ?? "app";
                     found.Add(new ProcessMatch(pid, $"{name} (PID {pid})"));
                 }
             }
             catch (ManagementException mex)
             {
-                _logger.LogError(mex, "WMI query failed while scanning launcher processes.");
+                _logger.LogError(mex, "WMI query failed while scanning blocked app processes.");
             }
         }
 

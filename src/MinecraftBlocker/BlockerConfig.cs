@@ -8,8 +8,8 @@ namespace MinecraftBlocker;
 public sealed class BlockerConfig
 {
     /// <summary>
-    /// Days on which Minecraft is blocked all day (unless an AllowedTimeWindow applies).
-    /// Default: Monday – Friday.
+    /// Days on which blocked apps are killed unconditionally (unless an AllowedTimeWindow applies).
+    /// Default: Monday - Friday.
     /// </summary>
     public List<DayOfWeek> BlockedDays { get; set; } =
     [
@@ -21,36 +21,47 @@ public sealed class BlockerConfig
     ];
 
     /// <summary>
-    /// Optional override windows within a blocked day when Minecraft IS allowed.
+    /// Optional time windows within a blocked day when apps ARE allowed.
     /// Leave empty to block the entire day.
-    /// Example: [{ "Start": "17:00:00", "End": "21:00:00" }] allows play after 5 pm.
+    /// Example: [{ "Start": "17:00:00", "End": "21:00:00" }] allows use after 5 pm.
     /// </summary>
     public List<TimeWindow> AllowedTimeWindows { get; set; } = [];
 
     /// <summary>
-    /// Substrings checked against javaw.exe command-line to identify a Minecraft JVM.
-    /// Case-insensitive. Add extra paths here if you use a custom launcher profile.
+    /// Substrings matched (case-insensitive) against the javaw.exe command line.
+    /// Used to identify Java-based games (Minecraft, etc.) without killing unrelated
+    /// Java processes such as IDEs.
     /// </summary>
-    public List<string> MinecraftKeywords { get; set; } =
+    public List<string> JavaProcessKeywords { get; set; } =
     [
         ".minecraft",
+        ".lunarclient",
         "minecraft"
     ];
 
     /// <summary>
-    /// Process names (without .exe) of the Minecraft launcher itself.
-    /// The service kills these unconditionally on a blocked day/time.
+    /// Substrings matched (case-insensitive) against a process's ExecutablePath via WMI.
+    /// Catches launchers and native game executables regardless of how many helper
+    /// processes the app spawns. Add any folder or exe name fragment here.
     /// </summary>
-    public List<string> LauncherProcessNames { get; set; } =
+    public List<string> ProcessPathKeywords { get; set; } =
     [
+        // Minecraft launchers
+        "Lunar Client",
         "MinecraftLauncher",
-        "minecraft-launcher",
-        "Minecraft Launcher"
+        // Fortnite (Epic Games)
+        "FortniteClient-Win64-Shipping",
+        "EpicGamesLauncher",
+        // Roblox
+        "RobloxPlayerBeta",
+        "RobloxPlayer",
+        "RobloxPlayerLauncher"
     ];
 
     /// <summary>
-    /// Daily play-time limit in minutes on free days (weekend / days not in BlockedDays).
-    /// The counter resets at midnight. Set to 0 for unlimited play on free days.
+    /// Daily entertainment time limit in minutes on free days (weekend / days not in BlockedDays).
+    /// Shared across ALL blocked apps — 30 min Roblox + 30 min Fortnite = 60 min total.
+    /// Counter resets at midnight. Set to 0 for unlimited play on free days.
     /// Default: 60 minutes.
     /// </summary>
     public int FreeDayDailyLimitMinutes { get; set; } = 60;
@@ -69,7 +80,7 @@ public sealed class BlockerConfig
     public bool LogBlockedAttempts { get; set; } = true;
 
     /// <summary>Custom Windows Event Log source name.</summary>
-    public string EventLogSource { get; set; } = "MinecraftBlocker";
+    public string EventLogSource { get; set; } = "ScreenTimeGuard";
 }
 
 /// <summary>A half-open time interval [Start, End) within a single day.</summary>
